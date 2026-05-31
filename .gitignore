@@ -1,0 +1,27 @@
+# --- P4 编译产物 ---
+*.json          # bmv2 JSON (p4c -b bmv2 输出)
+build/
+*.p4i           # p4c 预处理中间文件
+p4runtime_info.txt
+*.p4info.txt
+*.p4info.txtpb
+
+# --- 运行时/日志 ---
+*.log
+logs/
+*.pcap
+pcaps/
+nohup.out
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# --- 编辑器/系统 ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
