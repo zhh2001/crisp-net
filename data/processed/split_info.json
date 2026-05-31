@@ -1,0 +1,39 @@
+{
+  "seed": 42,
+  "window_packets": 32,
+  "k_flows_per_file": 150,
+  "max_win_per_flow": 12,
+  "cap_per_class_per_split": 1600,
+  "split_unit": "biflow (no biflow crosses splits)",
+  "counts": {
+    "train": {
+      "ssh": 131,
+      "meet": 169,
+      "mail": 230,
+      "streaming": 1600,
+      "non_streaming": 1600
+    },
+    "calibration": {
+      "ssh": 30,
+      "meet": 50,
+      "mail": 61,
+      "streaming": 1489,
+      "non_streaming": 1600
+    },
+    "test": {
+      "ssh": 68,
+      "meet": 70,
+      "mail": 74,
+      "streaming": 1439,
+      "non_streaming": 1600
+    }
+  },
+  "n_biflows_per_label": {
+    "ssh": 61,
+    "meet": 62,
+    "mail": 66,
+    "streaming": 695,
+    "non_streaming": 937
+  },
+  "calibration_used_this_step": false
+}

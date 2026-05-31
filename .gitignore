@@ -12,6 +12,7 @@ logs/
 *.pcap
 pcaps/
 nohup.out
+docs/*_run.txt
 
 # --- Python ---
 __pycache__/
@@ -25,3 +26,5 @@ venv/
 .idea/
 *.swp
 .DS_Store
+
+*.zip

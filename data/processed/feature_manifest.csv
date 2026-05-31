@@ -1,0 +1,13 @@
+feature,p4_computable,stateful,note
+proto_tcp,YES,no,"ipv4.protocol==6,解析即得"
+port_src,YES,no,"tcp/udp 源端口(临时端口,信息量低)"
+port_dst,YES,no,"tcp/udp 目的端口(VPN 隧道下反映隧道端口,非应用)"
+len_1..len_8,YES,reg,前8包长度=ipv4.totalLen;按流内包计数器索引(少量寄存器)
+dir_1..dir_8,YES,reg,前8包方向:由入端口/流发起方判定(寄存器存发起方)
+iat_2..iat_8,YES,reg,前8包相邻间隔=ingress_global_timestamp 差(寄存器存上一包时间戳)
+sum_len/min_len/max_len,YES,reg,"全段(32包)包长累加/最小/最大,整数运算(寄存器)"
+n_fwd/n_bwd,YES,reg,全段正向/反向包计数(寄存器)
+n_small/n_large,YES,reg,"全段 <200B 小包数 / >=1200B 近MTU大包数(比较+计数,寄存器)"
+iat_sum/iat_max,YES,reg,全段相邻间隔之和/最大(寄存器累加与比较)
+syn0/ack0/fin0/rst0/psh0,YES,no,"首包 TCP flags 位,解析即得"
+(均值/方差等),NO,-,"需除法/平方,P4 无除法 -> 本基线刻意不使用,改用 sum+count 等价表达"
