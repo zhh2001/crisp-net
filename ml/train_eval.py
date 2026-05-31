@@ -102,7 +102,7 @@ def confidence_scores(model, X):
 
 
 def run_model(
-    name, model, feat_cols, train, test, labels, report_lines, figdir, procdir
+    name, model, feat_cols, train, test, labels, report_lines, figdir, procdir, tag=""
 ):
     Xtr, ytr = train[feat_cols].values, train["label"].values
     Xte, yte = test[feat_cols].values, test["label"].values
@@ -161,12 +161,12 @@ def run_model(
     ascii_title = (
         "DecisionTree" if is_dt else "RandomForest"
     ) + " (test) acc=%.3f macroF1=%.3f" % (acc, mf1)
-    out_png = os.path.join(figdir, "confusion_matrix_%s.png" % suffix)
+    out_png = os.path.join(figdir, "confusion_matrix_%s%s.png" % (suffix, tag))
     plot_confusion(yte, ypred, labels, ascii_title, out_png)
     report_lines.append("混淆矩阵图:%s" % os.path.relpath(out_png, REPO))
 
     # 导出 test 每条预测的 真值/预测/置信度(供第3步保形阈值)
-    out_csv = os.path.join(procdir, "preds_test_%s.csv" % suffix)
+    out_csv = os.path.join(procdir, "preds_test_%s%s.csv" % (suffix, tag))
     pd.DataFrame({"true_label": yte, "pred_label": ypred, "confidence": conf}).to_csv(
         out_csv, index=False
     )
@@ -178,20 +178,21 @@ def run_model(
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--features", default=os.path.join(REPO, "data", "processed", "features.csv")
-    )
+    ap.add_argument("--procdir", default=os.path.join(REPO, "data", "processed"))
+    ap.add_argument("--features", default=None)
+    ap.add_argument("--tag", default="", help="输出文件名后缀(如 _quic),勿覆盖 VPN 产物")
     ap.add_argument("--dt-max-depth", type=int, default=10)
     ap.add_argument("--rf-trees", type=int, default=10)
     ap.add_argument("--rf-max-depth", type=int, default=8)
     args = ap.parse_args()
 
     figdir = os.path.join(REPO, "experiments", "figures")
-    procdir = os.path.join(REPO, "data", "processed")
+    procdir = args.procdir
     os.makedirs(figdir, exist_ok=True)
     os.makedirs(procdir, exist_ok=True)
+    features = args.features or os.path.join(procdir, "features.csv")
 
-    df, feat_cols, train, test = load_split(args.features)
+    df, feat_cols, train, test = load_split(features)
     labels = sorted(df["label"].unique().tolist())
 
     report = []
@@ -221,6 +222,7 @@ def main():
         report,
         figdir,
         procdir,
+        args.tag,
     )
     run_model(
         "随机森林 RandomForest(%d×depth%d)" % (args.rf_trees, args.rf_max_depth),
@@ -232,11 +234,12 @@ def main():
         report,
         figdir,
         procdir,
+        args.tag,
     )
 
     text = "\n".join(report)
     print(text)
-    out_txt = os.path.join(REPO, "experiments", "track1_metrics.txt")
+    out_txt = os.path.join(REPO, "experiments", "track1_metrics%s.txt" % args.tag)
     with open(out_txt, "w") as f:
         f.write(text + "\n")
     print("\n[train_eval] 指标已写入 %s" % os.path.relpath(out_txt, REPO))

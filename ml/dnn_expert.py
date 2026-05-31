@@ -50,27 +50,31 @@ def normalize_seq(X):
     return Xn
 
 
-def load_window():
-    d = np.load(os.path.join(PROC, "sequences.npz"), allow_pickle=True)
+def load_window(proc):
+    d = np.load(os.path.join(proc, "sequences.npz"), allow_pickle=True)
     X = normalize_seq(d["X_seq"]); seqlen = d["seq_len"].astype(np.int64)
     split = d["split"].astype(str)
-    df = pd.read_csv(os.path.join(PROC, "features.csv"))
+    df = pd.read_csv(os.path.join(proc, "features.csv"))
     assert len(df) == len(X) and (df["split"].to_numpy().astype(str) == split).all()
-    y = df["label"].map(LAB2I).to_numpy()
+    labels = sorted(df["label"].unique().tolist())
+    lab2i = {l: i for i, l in enumerate(labels)}
+    y = df["label"].map(lab2i).to_numpy()
     scal = np.stack([df["proto_tcp"].to_numpy().astype(np.float32),
                      np.clip(df["port_dst"].to_numpy().astype(np.float32), 0, 65535) / 65535.0], axis=1)
     bid = df["biflow_id"].to_numpy()
-    return X, seqlen, scal, y, split, bid
+    return X, seqlen, scal, y, split, bid, labels
 
 
 def load_selfcontained(path):
     d = np.load(path, allow_pickle=True)
     X = normalize_seq(d["X_seq"]); seqlen = d["seq_len"].astype(np.int64)
     split = d["split"].astype(str)
-    y = np.array([LAB2I[l] for l in d["label"]])
+    labels = sorted(np.unique(d["label"]).tolist())
+    lab2i = {l: i for i, l in enumerate(labels)}
+    y = np.array([lab2i[l] for l in d["label"]])
     scal = d["scalars"].astype(np.float32)
     bid = d["biflow_id"].astype(str)
-    return X, seqlen, scal, y, split, bid
+    return X, seqlen, scal, y, split, bid, labels
 
 
 class SeqCNN(nn.Module):
@@ -101,21 +105,24 @@ def make_mask(seqlen, T):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seq-file", default=None, help="自包含 npz;不给则用窗口模式")
+    ap.add_argument("--proc", default=PROC, help="处理目录(含 sequences.npz/features.csv)")
     ap.add_argument("--epochs", type=int, default=200)
     ap.add_argument("--patience", type=int, default=25)
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--tag", default="dnn")
+    ap.add_argument("--fig-suffix", default="", help="图文件名额外后缀(如 _quic),避免覆盖 VPN 图")
     args = ap.parse_args()
 
     set_seed()
     os.makedirs(FIG, exist_ok=True)
+    proc = args.proc
     dev = "cuda" if torch.cuda.is_available() else "cpu"
 
     if args.seq_file:
-        X, seqlen, scal, y, split, bid = load_selfcontained(args.seq_file)
+        X, seqlen, scal, y, split, bid, LABELS = load_selfcontained(args.seq_file)
     else:
-        X, seqlen, scal, y, split, bid = load_window()
+        X, seqlen, scal, y, split, bid, LABELS = load_window(proc)
     T = X.shape[1]
     mask = make_mask(seqlen, T)
     print("[dnn] tag=%s  device=%s  T=%d  通道=%d" % (args.tag, dev, T, X.shape[2]))
@@ -177,15 +184,15 @@ def main():
     print(classification_report(ytrue, ypred, labels=LABELS, digits=3, zero_division=0))
 
     pd.DataFrame({"true_label": ytrue, "pred_label": ypred, "confidence": conf}).to_csv(
-        os.path.join(PROC, "preds_test_%s.csv" % args.tag), index=False)
-    np.savez_compressed(os.path.join(PROC, "%s_test_probs.npz" % args.tag),
+        os.path.join(proc, "preds_test_%s.csv" % args.tag), index=False)
+    np.savez_compressed(os.path.join(proc, "%s_test_probs.npz" % args.tag),
                         probs=probs, classes=np.array(LABELS), true=ytrue, pred=ypred)
     cm = confusion_matrix(ytrue, ypred, labels=LABELS)
     disp = ConfusionMatrixDisplay(cm, display_labels=LABELS)
     fig, ax = plt.subplots(figsize=(8, 7))
     disp.plot(ax=ax, cmap="Greens", xticks_rotation=45, colorbar=False, values_format="d")
     ax.set_title("DNN expert [%s] (test) acc=%.3f macroF1=%.3f" % (args.tag, acc, mf1))
-    plt.tight_layout(); fig.savefig(os.path.join(FIG, "confusion_matrix_%s.png" % args.tag), dpi=120)
+    plt.tight_layout(); fig.savefig(os.path.join(FIG, "confusion_matrix_%s%s.png" % (args.tag, args.fig_suffix)), dpi=120)
     print("[dnn] 已存 (tag=%s)" % args.tag)
 
 

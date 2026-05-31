@@ -1,0 +1,38 @@
+{
+  "seed": 42,
+  "window_packets": 32,
+  "dataset": "UC Davis QUIC ICDM19 (figshare 23538141, tcbench parquet)",
+  "cap_per_class_per_split": 1600,
+  "n_flows_per_label": {
+    "google-doc": 1174,
+    "google-drive": 1492,
+    "google-music": 620,
+    "google-search": 1683,
+    "youtube": 1068
+  },
+  "counts": {
+    "train": {
+      "google-doc": 1600,
+      "google-drive": 1600,
+      "google-music": 1600,
+      "google-search": 1600,
+      "youtube": 1600
+    },
+    "calibration": {
+      "google-doc": 1600,
+      "google-drive": 1600,
+      "google-music": 1524,
+      "google-search": 1600,
+      "youtube": 1600
+    },
+    "test": {
+      "google-doc": 1600,
+      "google-drive": 1600,
+      "google-music": 1524,
+      "google-search": 1600,
+      "youtube": 1600
+    }
+  },
+  "calibration_used_this_step": false,
+  "note": "QUIC=UDP,无 ports/TCP flags -> proto_tcp/port_*/flags 恒为0;其余特征与VPN同定义/同W=32"
+}

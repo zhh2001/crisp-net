@@ -80,13 +80,26 @@ def op_at_alpha(score, correct_cheap, correct_dnn, alpha):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--proc", default=PROC, help="处理目录(含 features.csv / preds_test_dnn.csv)")
+    ap.add_argument("--tag", default="", help="输出文件名后缀(如 _quic),勿覆盖 VPN 产物")
+    args = ap.parse_args()
+    proc, tag = args.proc, args.tag
     os.makedirs(FIG, exist_ok=True)
-    df = pd.read_csv(os.path.join(PROC, "features.csv"))
+    df = pd.read_csv(os.path.join(proc, "features.csv"))
     fc = [c for c in df.columns if c not in NON_FEATURE]
+    labels = sorted(df["label"].unique().tolist())
+    # "模糊类"标注仅在 VPN 标签集时套用(QUIC 无预定义模糊集)
+    ambig = AMBIG if set(labels) == set(LABELS) else set()
     tr = df[df.split == "train"].reset_index(drop=True)
     te = df[df.split == "test"].reset_index(drop=True)
-    Xtr, ytr, gtr = tr[fc].values, tr["label"].values, tr["biflow_id"].values
-    Xte, yte = te[fc].values, te["label"].values
+    # 强制转 numpy(pandas3+pyarrow 后端的字符串列会破坏 sklearn 的分组索引)
+    Xtr = tr[fc].to_numpy(dtype=float)
+    ytr = tr["label"].to_numpy(dtype=object)
+    gtr = tr["biflow_id"].to_numpy(dtype=object)
+    Xte = te[fc].to_numpy(dtype=float)
+    yte = te["label"].to_numpy(dtype=object)
 
     # ---- 被门控的廉价模型:RF10(与第3步一致)----
     rf = RandomForestClassifier(
@@ -112,7 +125,7 @@ def main():
     log("[A] RF10 test accuracy=%.4f" % correct_rf.mean())
 
     # DNN 专家预测(第3步,廉价特征之外;仅用于'拒绝'分支与 oracle)
-    dnn = pd.read_csv(os.path.join(PROC, "preds_test_dnn.csv"))
+    dnn = pd.read_csv(os.path.join(proc, "preds_test_dnn.csv"))
     assert (dnn["true_label"].values == yte).all()
     correct_dnn = (dnn["pred_label"].values == yte).astype(int)
 
@@ -262,8 +275,8 @@ def main():
         a.legend(fontsize=7, loc="lower left")
     plt.suptitle("CRISP-Net step4: learned gating vs confidence scores")
     plt.tight_layout()
-    fig.savefig(os.path.join(FIG, "gating_risk_coverage.png"), dpi=120)
-    log("\n[fig] experiments/figures/gating_risk_coverage.png")
+    fig.savefig(os.path.join(FIG, "gating_risk_coverage%s.png" % tag), dpi=120)
+    log("\n[fig] experiments/figures/gating_risk_coverage%s.png" % tag)
 
     # ---- C. 按类别拆解可门控性 ----
     log("\n[C] 按真实类别拆解(门控=%s):" % best_gate)
@@ -280,7 +293,7 @@ def main():
         if phi5 > 0
         else np.inf
     )
-    for c in LABELS:
+    for c in labels:
         m = yte == c
         n = int(m.sum())
         rfa = correct_rf[m].mean()
@@ -298,11 +311,11 @@ def main():
                 rfa,
                 ("%.3f" % au) if au == au else "  n/a",
                 cov_c,
-                "  <-- 模糊" if c in AMBIG else "",
+                "  <-- 模糊" if c in ambig else "",
             )
         )
 
-    with open(os.path.join(REPO, "experiments", "step4_metrics.txt"), "w") as f:
+    with open(os.path.join(REPO, "experiments", "step4_metrics%s.txt" % tag), "w") as f:
         f.write("\n".join(out) + "\n")
     json.dump(
         {
@@ -314,7 +327,7 @@ def main():
             "alpha5_baseline": dict(phi=float(base5[0]), e2e=float(base5[2])),
             "alpha5_learned": dict(phi=float(best5[0]), e2e=float(best5[2])),
         },
-        open(os.path.join(PROC, "gating_summary.json"), "w"),
+        open(os.path.join(proc, "gating_summary%s.json" % tag), "w"),
         indent=2,
         ensure_ascii=False,
     )
