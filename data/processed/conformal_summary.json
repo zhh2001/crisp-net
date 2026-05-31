@@ -1,0 +1,52 @@
+{
+  "A": {
+    "(0.01, 'RCPS(Hoeffding,δ=0.1)')": {
+      "tau": null,
+      "cov": 0.0,
+      "err": null,
+      "e2e": 0.5561365733620425
+    },
+    "(0.01, 'naive split-conformal')": {
+      "tau": 0.7873813649994716,
+      "cov": 0.015687480775146107,
+      "err": 0.0,
+      "e2e": 0.556751768686558
+    },
+    "(0.05, 'RCPS(Hoeffding,δ=0.1)')": {
+      "tau": null,
+      "cov": 0.0,
+      "err": null,
+      "e2e": 0.5561365733620425
+    },
+    "(0.05, 'naive split-conformal')": {
+      "tau": 0.7627849359000268,
+      "cov": 0.016917871424177177,
+      "err": 0.0,
+      "e2e": 0.556751768686558
+    },
+    "(0.1, 'RCPS(Hoeffding,δ=0.1)')": {
+      "tau": null,
+      "cov": 0.0,
+      "err": null,
+      "e2e": 0.5561365733620425
+    },
+    "(0.1, 'naive split-conformal')": {
+      "tau": 0.7087049396648972,
+      "cov": 0.02122423869578591,
+      "err": 0.014492753623188406,
+      "e2e": 0.5570593663488157
+    }
+  },
+  "per_class_accept_a5": {
+    "mail": 0.0,
+    "meet": 0.0,
+    "non_streaming": 0.0,
+    "ssh": 0.0,
+    "streaming": 0.0
+  },
+  "tau5_rcps": Infinity,
+  "resample_violation_rcps": null,
+  "resample_violation_naive": 0.485,
+  "rcps_coverage_zero": true,
+  "aci": {}
+}
