@@ -7,8 +7,8 @@ const bit<16> TYPE_IPV4 = 0x0800; const bit<8> PROTO_UDP = 17;
 #define W 32
 #define DETAIL 8
 #define BASE_PORT 10000
-const bit<16> SMALL_TH = 200; const bit<16> LARGE_TH = 1200; const bit<32> DIGEST_ID = 1;
-const bit<32> TAU8 = 228;   // 第6步 QUIC α=5% 的 8-bit 量化 τ̂(7b 静态常量;7d ACI 改用可写表)
+const bit<16> SMALL_TH = 200; const bit<16> LARGE_TH = 1200; const bit<32> DIGEST_ID = 1; const bit<32> DIGEST_SEQ = 2;
+const bit<32> TAU8 = 241;   // 第6步 QUIC α=5% 的 8-bit 量化 τ̂(7b 静态常量;7d ACI 改用可写表)
 typedef bit<48> macAddr_t; typedef bit<32> ip4Addr_t;
 
 header ethernet_t { macAddr_t dstAddr; macAddr_t srcAddr; bit<16> etherType; }
@@ -56,14 +56,14 @@ struct metadata {
 struct headers { ethernet_t ethernet; ipv4_t ipv4; udp_t udp; drv_t drv; }
 
 struct dec_digest_t { bit<16> flow_id; bit<8> pred; bit<32> score; bit<16> calib8; bit<8> accept; }
-
+struct seq_digest_t { bit<16> flow_id; bit<16> slen_1; bit<16> slen_2; bit<16> slen_3; bit<16> slen_4; bit<16> slen_5; bit<16> slen_6; bit<16> slen_7; bit<16> slen_8; bit<16> slen_9; bit<16> slen_10; bit<16> slen_11; bit<16> slen_12; bit<16> slen_13; bit<16> slen_14; bit<16> slen_15; bit<16> slen_16; bit<16> slen_17; bit<16> slen_18; bit<16> slen_19; bit<16> slen_20; bit<16> slen_21; bit<16> slen_22; bit<16> slen_23; bit<16> slen_24; bit<16> slen_25; bit<16> slen_26; bit<16> slen_27; bit<16> slen_28; bit<16> slen_29; bit<16> slen_30; bit<16> slen_31; bit<16> slen_32; bit<8> sdir_1; bit<8> sdir_2; bit<8> sdir_3; bit<8> sdir_4; bit<8> sdir_5; bit<8> sdir_6; bit<8> sdir_7; bit<8> sdir_8; bit<8> sdir_9; bit<8> sdir_10; bit<8> sdir_11; bit<8> sdir_12; bit<8> sdir_13; bit<8> sdir_14; bit<8> sdir_15; bit<8> sdir_16; bit<8> sdir_17; bit<8> sdir_18; bit<8> sdir_19; bit<8> sdir_20; bit<8> sdir_21; bit<8> sdir_22; bit<8> sdir_23; bit<8> sdir_24; bit<8> sdir_25; bit<8> sdir_26; bit<8> sdir_27; bit<8> sdir_28; bit<8> sdir_29; bit<8> sdir_30; bit<8> sdir_31; bit<8> sdir_32; bit<32> siat_1; bit<32> siat_2; bit<32> siat_3; bit<32> siat_4; bit<32> siat_5; bit<32> siat_6; bit<32> siat_7; bit<32> siat_8; bit<32> siat_9; bit<32> siat_10; bit<32> siat_11; bit<32> siat_12; bit<32> siat_13; bit<32> siat_14; bit<32> siat_15; bit<32> siat_16; bit<32> siat_17; bit<32> siat_18; bit<32> siat_19; bit<32> siat_20; bit<32> siat_21; bit<32> siat_22; bit<32> siat_23; bit<32> siat_24; bit<32> siat_25; bit<32> siat_26; bit<32> siat_27; bit<32> siat_28; bit<32> siat_29; bit<32> siat_30; bit<32> siat_31; bit<32> siat_32; }
 
 register<bit<8>>(NUM_FLOWS) r_count;  register<bit<16>>(NUM_FLOWS) r_fp;
 register<bit<32>>(NUM_FLOWS) r_sum; register<bit<16>>(NUM_FLOWS) r_min; register<bit<16>>(NUM_FLOWS) r_max;
 register<bit<16>>(NUM_FLOWS) r_nfwd; register<bit<16>>(NUM_FLOWS) r_nbwd;
 register<bit<16>>(NUM_FLOWS) r_nsmall; register<bit<16>>(NUM_FLOWS) r_nlarge;
 register<bit<32>>(NUM_FLOWS) r_iatsum; register<bit<32>>(NUM_FLOWS) r_iatmax;
-register<bit<16>>(NUM_FLOWS*8) r_len; register<bit<8>>(NUM_FLOWS*8) r_dir; register<bit<32>>(NUM_FLOWS*8) r_iat;
+register<bit<16>>(NUM_FLOWS*32) r_len; register<bit<8>>(NUM_FLOWS*32) r_dir; register<bit<32>>(NUM_FLOWS*32) r_iat;
 register<bit<32>>(1) r_collisions;
 
 parser MyParser(packet_in packet, out headers hdr, inout metadata meta, inout standard_metadata_t sm) {
@@ -479,7 +479,7 @@ control MyIngress(inout headers hdr, inout metadata meta, inout standard_metadat
     bit<8> cnt; r_count.read(cnt, slot); bit<32> pos = (bit<32>)cnt;
     bit<16> len = hdr.ipv4.totalLen; bit<16> dirb = hdr.drv.dir;
     bit<32> iat = (pos == 0) ? 0 : hdr.drv.iat_us;
-    if (pos < 8) { bit<32> idx = slot*8 + pos; r_len.write(idx,len); r_dir.write(idx,(bit<8>)dirb); r_iat.write(idx,iat); }
+    if (pos < 32) { bit<32> idx = slot*32 + pos; r_len.write(idx,len); r_dir.write(idx,(bit<8>)dirb); r_iat.write(idx,iat); }
     if (pos == 0) {
       r_sum.write(slot,(bit<32>)len); r_min.write(slot,len); r_max.write(slot,len);
       r_nfwd.write(slot,(dirb==1)?16w1:16w0); r_nbwd.write(slot,(dirb==0)?16w1:16w0);
@@ -499,29 +499,29 @@ control MyIngress(inout headers hdr, inout metadata meta, inout standard_metadat
     cnt = cnt + 1;
     if (cnt == W) {
       // 读回 40 维特征到 metadata(数据面单位:dir 0/1,iat µs)
-      {{ bit<16> v; r_len.read(v, slot*8 + 0); meta.f_len_1 = (bit<32>)v; }}
-      {{ bit<8> v; r_dir.read(v, slot*8 + 0); meta.f_dir_1 = (bit<32>)v; }}
-      {{ bit<16> v; r_len.read(v, slot*8 + 1); meta.f_len_2 = (bit<32>)v; }}
-      {{ bit<8> v; r_dir.read(v, slot*8 + 1); meta.f_dir_2 = (bit<32>)v; }}
-      {{ bit<16> v; r_len.read(v, slot*8 + 2); meta.f_len_3 = (bit<32>)v; }}
-      {{ bit<8> v; r_dir.read(v, slot*8 + 2); meta.f_dir_3 = (bit<32>)v; }}
-      {{ bit<16> v; r_len.read(v, slot*8 + 3); meta.f_len_4 = (bit<32>)v; }}
-      {{ bit<8> v; r_dir.read(v, slot*8 + 3); meta.f_dir_4 = (bit<32>)v; }}
-      {{ bit<16> v; r_len.read(v, slot*8 + 4); meta.f_len_5 = (bit<32>)v; }}
-      {{ bit<8> v; r_dir.read(v, slot*8 + 4); meta.f_dir_5 = (bit<32>)v; }}
-      {{ bit<16> v; r_len.read(v, slot*8 + 5); meta.f_len_6 = (bit<32>)v; }}
-      {{ bit<8> v; r_dir.read(v, slot*8 + 5); meta.f_dir_6 = (bit<32>)v; }}
-      {{ bit<16> v; r_len.read(v, slot*8 + 6); meta.f_len_7 = (bit<32>)v; }}
-      {{ bit<8> v; r_dir.read(v, slot*8 + 6); meta.f_dir_7 = (bit<32>)v; }}
-      {{ bit<16> v; r_len.read(v, slot*8 + 7); meta.f_len_8 = (bit<32>)v; }}
-      {{ bit<8> v; r_dir.read(v, slot*8 + 7); meta.f_dir_8 = (bit<32>)v; }}
-      {{ bit<32> v; r_iat.read(v, slot*8 + 1); meta.f_iat_2 = v; }}
-      {{ bit<32> v; r_iat.read(v, slot*8 + 2); meta.f_iat_3 = v; }}
-      {{ bit<32> v; r_iat.read(v, slot*8 + 3); meta.f_iat_4 = v; }}
-      {{ bit<32> v; r_iat.read(v, slot*8 + 4); meta.f_iat_5 = v; }}
-      {{ bit<32> v; r_iat.read(v, slot*8 + 5); meta.f_iat_6 = v; }}
-      {{ bit<32> v; r_iat.read(v, slot*8 + 6); meta.f_iat_7 = v; }}
-      {{ bit<32> v; r_iat.read(v, slot*8 + 7); meta.f_iat_8 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 0); meta.f_len_1 = (bit<32>)v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 0); meta.f_dir_1 = (bit<32>)v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 1); meta.f_len_2 = (bit<32>)v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 1); meta.f_dir_2 = (bit<32>)v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 2); meta.f_len_3 = (bit<32>)v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 2); meta.f_dir_3 = (bit<32>)v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 3); meta.f_len_4 = (bit<32>)v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 3); meta.f_dir_4 = (bit<32>)v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 4); meta.f_len_5 = (bit<32>)v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 4); meta.f_dir_5 = (bit<32>)v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 5); meta.f_len_6 = (bit<32>)v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 5); meta.f_dir_6 = (bit<32>)v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 6); meta.f_len_7 = (bit<32>)v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 6); meta.f_dir_7 = (bit<32>)v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 7); meta.f_len_8 = (bit<32>)v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 7); meta.f_dir_8 = (bit<32>)v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 1); meta.f_iat_2 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 2); meta.f_iat_3 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 3); meta.f_iat_4 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 4); meta.f_iat_5 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 5); meta.f_iat_6 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 6); meta.f_iat_7 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 7); meta.f_iat_8 = v; }}
       {{ bit<32> v; r_sum.read(v, slot); meta.f_sum_len = (bit<32>)v; }}
       {{ bit<16> v; r_min.read(v, slot); meta.f_min_len = (bit<32>)v; }}
       {{ bit<16> v; r_max.read(v, slot); meta.f_max_len = (bit<32>)v; }}
@@ -555,8 +555,107 @@ control MyIngress(inout headers hdr, inout metadata meta, inout standard_metadat
       dec_digest_t dd;
       dd.flow_id = hdr.udp.srcPort; dd.pred = meta.pred; dd.score = meta.score;
       dd.calib8 = meta.calib8; dd.accept = meta.accept;
-      digest<dec_digest_t>(DIGEST_ID, dd);
-
+      if (meta.accept == 1) { digest<dec_digest_t>(DIGEST_ID, dd); }
+      else {
+      seq_digest_t sq; sq.flow_id = hdr.udp.srcPort;
+      {{ bit<16> v; r_len.read(v, slot*32 + 0); sq.slen_1 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 0); sq.sdir_1 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 0); sq.siat_1 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 1); sq.slen_2 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 1); sq.sdir_2 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 1); sq.siat_2 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 2); sq.slen_3 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 2); sq.sdir_3 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 2); sq.siat_3 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 3); sq.slen_4 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 3); sq.sdir_4 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 3); sq.siat_4 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 4); sq.slen_5 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 4); sq.sdir_5 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 4); sq.siat_5 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 5); sq.slen_6 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 5); sq.sdir_6 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 5); sq.siat_6 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 6); sq.slen_7 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 6); sq.sdir_7 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 6); sq.siat_7 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 7); sq.slen_8 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 7); sq.sdir_8 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 7); sq.siat_8 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 8); sq.slen_9 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 8); sq.sdir_9 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 8); sq.siat_9 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 9); sq.slen_10 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 9); sq.sdir_10 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 9); sq.siat_10 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 10); sq.slen_11 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 10); sq.sdir_11 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 10); sq.siat_11 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 11); sq.slen_12 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 11); sq.sdir_12 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 11); sq.siat_12 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 12); sq.slen_13 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 12); sq.sdir_13 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 12); sq.siat_13 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 13); sq.slen_14 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 13); sq.sdir_14 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 13); sq.siat_14 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 14); sq.slen_15 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 14); sq.sdir_15 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 14); sq.siat_15 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 15); sq.slen_16 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 15); sq.sdir_16 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 15); sq.siat_16 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 16); sq.slen_17 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 16); sq.sdir_17 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 16); sq.siat_17 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 17); sq.slen_18 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 17); sq.sdir_18 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 17); sq.siat_18 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 18); sq.slen_19 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 18); sq.sdir_19 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 18); sq.siat_19 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 19); sq.slen_20 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 19); sq.sdir_20 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 19); sq.siat_20 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 20); sq.slen_21 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 20); sq.sdir_21 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 20); sq.siat_21 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 21); sq.slen_22 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 21); sq.sdir_22 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 21); sq.siat_22 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 22); sq.slen_23 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 22); sq.sdir_23 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 22); sq.siat_23 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 23); sq.slen_24 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 23); sq.sdir_24 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 23); sq.siat_24 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 24); sq.slen_25 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 24); sq.sdir_25 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 24); sq.siat_25 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 25); sq.slen_26 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 25); sq.sdir_26 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 25); sq.siat_26 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 26); sq.slen_27 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 26); sq.sdir_27 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 26); sq.siat_27 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 27); sq.slen_28 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 27); sq.sdir_28 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 27); sq.siat_28 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 28); sq.slen_29 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 28); sq.sdir_29 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 28); sq.siat_29 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 29); sq.slen_30 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 29); sq.sdir_30 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 29); sq.siat_30 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 30); sq.slen_31 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 30); sq.sdir_31 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 30); sq.siat_31 = v; }}
+      {{ bit<16> v; r_len.read(v, slot*32 + 31); sq.slen_32 = v; }}
+      {{ bit<8> v; r_dir.read(v, slot*32 + 31); sq.sdir_32 = v; }}
+      {{ bit<32> v; r_iat.read(v, slot*32 + 31); sq.siat_32 = v; }}
+        digest<seq_digest_t>(DIGEST_SEQ, sq);
+      }
       r_count.write(slot, 0);
     } else { r_count.write(slot, cnt); }
     sm.egress_spec = 2;

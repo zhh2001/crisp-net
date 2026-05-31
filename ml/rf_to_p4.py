@@ -90,13 +90,14 @@ struct metadata {{
 struct headers {{ ethernet_t ethernet; ipv4_t ipv4; udp_t udp; drv_t drv; }}
 
 struct dec_digest_t {{ bit<16> flow_id; bit<8> pred; bit<32> score; bit<16> calib8; bit<8> accept; }}
+{seq_struct_decl}
 
 register<bit<8>>(NUM_FLOWS) r_count;  register<bit<16>>(NUM_FLOWS) r_fp;
 register<bit<32>>(NUM_FLOWS) r_sum; register<bit<16>>(NUM_FLOWS) r_min; register<bit<16>>(NUM_FLOWS) r_max;
 register<bit<16>>(NUM_FLOWS) r_nfwd; register<bit<16>>(NUM_FLOWS) r_nbwd;
 register<bit<16>>(NUM_FLOWS) r_nsmall; register<bit<16>>(NUM_FLOWS) r_nlarge;
 register<bit<32>>(NUM_FLOWS) r_iatsum; register<bit<32>>(NUM_FLOWS) r_iatmax;
-register<bit<16>>(NUM_FLOWS*8) r_len; register<bit<8>>(NUM_FLOWS*8) r_dir; register<bit<32>>(NUM_FLOWS*8) r_iat;
+register<bit<16>>(NUM_FLOWS*{det_size}) r_len; register<bit<8>>(NUM_FLOWS*{det_size}) r_dir; register<bit<32>>(NUM_FLOWS*{det_size}) r_iat;
 register<bit<32>>(1) r_collisions;
 
 parser MyParser(packet_in packet, out headers hdr, inout metadata meta, inout standard_metadata_t sm) {{
@@ -132,7 +133,7 @@ control MyIngress(inout headers hdr, inout metadata meta, inout standard_metadat
     bit<8> cnt; r_count.read(cnt, slot); bit<32> pos = (bit<32>)cnt;
     bit<16> len = hdr.ipv4.totalLen; bit<16> dirb = hdr.drv.dir;
     bit<32> iat = (pos == 0) ? 0 : hdr.drv.iat_us;
-    if (pos < DETAIL) {{ bit<32> idx = slot*8 + pos; r_len.write(idx,len); r_dir.write(idx,(bit<8>)dirb); r_iat.write(idx,iat); }}
+    if (pos < {det_size}) {{ bit<32> idx = slot*{det_size} + pos; r_len.write(idx,len); r_dir.write(idx,(bit<8>)dirb); r_iat.write(idx,iat); }}
     if (pos == 0) {{
       r_sum.write(slot,(bit<32>)len); r_min.write(slot,len); r_max.write(slot,len);
       r_nfwd.write(slot,(dirb==1)?16w1:16w0); r_nbwd.write(slot,(dirb==0)?16w1:16w0);
@@ -168,7 +169,7 @@ control MyIngress(inout headers hdr, inout metadata meta, inout standard_metadat
       dec_digest_t dd;
       dd.flow_id = hdr.udp.srcPort; dd.pred = meta.pred; dd.score = meta.score;
       dd.calib8 = meta.calib8; dd.accept = meta.accept;
-      digest<dec_digest_t>(DIGEST_ID, dd);
+{decision_emit}
       r_count.write(slot, 0);
     }} else {{ r_count.write(slot, cnt); }}
     sm.egress_spec = 2;
@@ -182,14 +183,14 @@ control MyDeparser(packet_out packet, in headers hdr) {{
 V1Switch(MyParser(), MyVerifyChecksum(), MyIngress(), MyEgress(), MyComputeChecksum(), MyDeparser()) main;
 """
 
-# 特征名 -> 寄存器读取语句
-def load_feats_code(key_feats):
+# 特征名 -> 寄存器读取语句(det 为每流明细槽数 8 或 32)
+def load_feats_code(key_feats, det=8):
     lines = []
     for i in range(8):
-        lines.append("      {{ bit<16> v; r_len.read(v, slot*8 + %d); meta.f_len_%d = (bit<32>)v; }}" % (i, i + 1))
-        lines.append("      {{ bit<8> v; r_dir.read(v, slot*8 + %d); meta.f_dir_%d = (bit<32>)v; }}" % (i, i + 1))
+        lines.append("      {{ bit<16> v; r_len.read(v, slot*%d + %d); meta.f_len_%d = (bit<32>)v; }}" % (det, i, i + 1))
+        lines.append("      {{ bit<8> v; r_dir.read(v, slot*%d + %d); meta.f_dir_%d = (bit<32>)v; }}" % (det, i, i + 1))
     for i in range(1, 8):
-        lines.append("      {{ bit<32> v; r_iat.read(v, slot*8 + %d); meta.f_iat_%d = v; }}" % (i, i + 1))
+        lines.append("      {{ bit<32> v; r_iat.read(v, slot*%d + %d); meta.f_iat_%d = v; }}" % (det, i, i + 1))
     aggreads = [("f_sum_len", "r_sum", 32), ("f_min_len", "r_min", 16), ("f_max_len", "r_max", 16),
                 ("f_n_fwd", "r_nfwd", 16), ("f_n_bwd", "r_nbwd", 16), ("f_n_small", "r_nsmall", 16),
                 ("f_n_large", "r_nlarge", 16), ("f_iat_sum", "r_iatsum", 32), ("f_iat_max", "r_iatmax", 32)]
@@ -198,7 +199,7 @@ def load_feats_code(key_feats):
     return "\n".join(lines)
 
 
-def gen():
+def gen(closed_loop=False, tau_override=None):
     P = R.RFGatePipeline(PROC)
     key_feats, trees, segs = build_entries(P)
     # metadata 特征字段(仅被使用的 32 个,均 bit<32>)
@@ -211,19 +212,54 @@ def gen():
             "    actions = { add_leaf; NoAction; }\n    default_action = NoAction(); size = 4096;\n  }\n"
             % (ti, key_block))
     tree_applies = "\n".join("      tree_%d.apply();" % ti for ti in range(len(trees)))
+
+    # 决策模式与闭环模式共用
+    det = 32 if closed_loop else 8
+    if closed_loop:
+        # seq_digest_t: flow_id + len_1..32(16) + dir_1..32(8) + iat_1..32(32)
+        sf = ["bit<16> flow_id;"]
+        sf += ["bit<16> slen_%d;" % i for i in range(1, 33)]
+        sf += ["bit<8> sdir_%d;" % i for i in range(1, 33)]
+        sf += ["bit<32> siat_%d;" % i for i in range(1, 33)]
+        seq_struct_decl = "struct seq_digest_t { " + " ".join(sf) + " }"
+        rd = ["      seq_digest_t sq; sq.flow_id = hdr.udp.srcPort;"]
+        for i in range(32):
+            rd.append("      {{ bit<16> v; r_len.read(v, slot*32 + %d); sq.slen_%d = v; }}" % (i, i + 1))
+            rd.append("      {{ bit<8> v; r_dir.read(v, slot*32 + %d); sq.sdir_%d = v; }}" % (i, i + 1))
+            rd.append("      {{ bit<32> v; r_iat.read(v, slot*32 + %d); sq.siat_%d = v; }}" % (i, i + 1))
+        rd.append("        digest<seq_digest_t>(DIGEST_SEQ, sq);")
+        # 每窗口恰一条 digest:accept->dec,defer->seq(显式 if/else,不依赖 bmv2"末次 digest 生效")
+        decision_emit = ("      if (meta.accept == 1) { digest<dec_digest_t>(DIGEST_ID, dd); }\n"
+                         "      else {\n" + "\n".join(rd) + "\n      }")
+    else:
+        seq_struct_decl = ""
+        decision_emit = "      digest<dec_digest_t>(DIGEST_ID, dd);"
+
+    tau8 = tau_override if tau_override is not None else int(P.tau8)
     p4 = P4_TEMPLATE.format(meta_fields=meta_fields, tree_tables=tree_tables,
-                            load_feats=load_feats_code(key_feats), tree_applies=tree_applies,
-                            tau8=int(P.tau8))
-    with open(os.path.join(REPO, "p4", "rf_gate.p4"), "w") as f:
+                            load_feats=load_feats_code(key_feats, det), tree_applies=tree_applies,
+                            tau8=tau8, det_size=det, seq_struct_decl=seq_struct_decl,
+                            decision_emit=decision_emit)
+    if closed_loop:
+        p4 = p4.replace("const bit<32> DIGEST_ID = 1;",
+                        "const bit<32> DIGEST_ID = 1; const bit<32> DIGEST_SEQ = 2;")
+    out_p4 = os.path.join(REPO, "p4", "rf_gate_cl.p4" if closed_loop else "rf_gate.p4")
+    with open(out_p4, "w") as f:
         f.write(p4)
-    entries = {"tau8": int(P.tau8), "key_feats": key_feats,
-               "classes": P.rf_classes, "trees": trees, "lut": segs,
-               "feats_order": R.FEATS}
-    with open(os.path.join(PROC, "rf_entries.json"), "w") as f:
+    entries = {"tau8": int(tau8), "key_feats": key_feats,
+               "classes": P.rf_classes, "trees": trees, "lut": segs, "feats_order": R.FEATS}
+    epath = os.path.join(PROC, "rf_entries_cl.json" if closed_loop else "rf_entries.json")
+    with open(epath, "w") as f:
         json.dump(entries, f)
-    print("[gen] p4/rf_gate.p4 写出;%d 棵树, 叶子合计 %d, LUT %d 段, tau8=%d, key特征 %d"
-          % (len(trees), sum(len(t) for t in trees), len(segs), int(P.tau8), len(key_feats)))
+    print("[gen] %s 写出;%d 树, 叶子 %d, LUT %d, tau8=%d, key特征 %d, det=%d"
+          % (os.path.basename(out_p4), len(trees), sum(len(t) for t in trees),
+             len(segs), tau8, len(key_feats), det))
 
 
 if __name__ == "__main__":
-    gen()
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--closed-loop", action="store_true")
+    ap.add_argument("--tau", type=int, default=None, help="覆盖 τ̂₈(7c 用 Part A 修正值)")
+    a = ap.parse_args()
+    gen(closed_loop=a.closed_loop, tau_override=a.tau)

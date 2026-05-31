@@ -1,0 +1,10 @@
+{
+  "tau8_deploy_7b": 228,
+  "tau8_corrected": 241,
+  "viol_window_rcps_byflow": 0.09666666666666666,
+  "viol_naive_byflow": 0.93,
+  "viol_corrected_byflow": 0.01,
+  "test_cov_corrected": 0.36484098939929327,
+  "test_accerr_corrected": 0.04116222760290557,
+  "guarantee_holds": true
+}

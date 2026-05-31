@@ -34,9 +34,12 @@ def build_flow_pkts(srcport, sizes, dirbits, iat_us):
 
 
 def main():
+    import time
     ap = argparse.ArgumentParser()
     ap.add_argument("--spec", required=True)
     ap.add_argument("--iface", default="h1-eth0")
+    ap.add_argument("--win", type=int, default=32, help="每多少包后停顿(给 digest 通道排空时间)")
+    ap.add_argument("--gap", type=float, default=0.0, help="每 --win 包后的停顿秒数(iat 已携带,放慢不影响特征)")
     args = ap.parse_args()
     d = np.load(args.spec, allow_pickle=True)
     flows = d["flows"]
@@ -44,9 +47,15 @@ def main():
     for f in flows:
         srcport, sizes, dirbits, iat_us = f
         pkts = build_flow_pkts(srcport, sizes, dirbits, iat_us)
-        sendp(pkts, iface=args.iface, verbose=False)
+        if args.gap > 0:
+            for i in range(0, len(pkts), args.win):
+                sendp(pkts[i:i + args.win], iface=args.iface, verbose=False)
+                time.sleep(args.gap)
+        else:
+            sendp(pkts, iface=args.iface, verbose=False)
         total += len(pkts)
-    print("feature_send: sent %d packets across %d flows" % (total, len(flows)))
+    print("feature_send: sent %d packets across %d flows (gap=%.3f/%dpkts)"
+          % (total, len(flows), args.gap, args.win))
 
 
 if __name__ == "__main__":
