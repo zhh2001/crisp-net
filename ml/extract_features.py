@@ -112,6 +112,36 @@ def window_features(pkts):
     return feat
 
 
+# 逐包序列通道(供 host DNN 专家;比树的"前8包明细+32包聚合"更丰富的完整序列表示)
+SEQ_CHANNELS = ["signed_len", "iat_ms", "dir", "syn", "ack", "fin", "rst", "psh"]
+
+
+def window_sequence(pkts):
+    """把一段窗口(<=W 包)编码为 [W, C] 的逐包序列(不足 W 补零),返回 (arr, 真实长度)。
+    通道:带符号包长、相邻 IAT(ms)、方向、TCP flags(syn/ack/fin/rst/psh)。"""
+    arr = np.zeros((W, len(SEQ_CHANNELS)), dtype=np.float32)
+    prev_ts = None
+    for i, p in enumerate(pkts[:W]):
+        try:
+            b = int(p["bytes"])
+        except Exception:
+            b = 0
+        ts = parse_ts(p.get("timestamp_start", ""))
+        if prev_ts is not None and ts is not None:
+            iat = min(max((ts - prev_ts) * 1000.0, 0.0), IAT_CLIP_MS)
+        else:
+            iat = 0.0
+        if ts is not None:
+            prev_ts = ts
+        fb = tcp_flag_bits(p.get("tcp_flags", ""))
+        arr[i, 0] = float(b)                               # signed_len
+        arr[i, 1] = float(iat)                             # iat_ms
+        arr[i, 2] = 1.0 if b > 0 else (-1.0 if b < 0 else 0.0)  # dir
+        arr[i, 3] = fb["syn"]; arr[i, 4] = fb["ack"]
+        arr[i, 5] = fb["fin"]; arr[i, 6] = fb["rst"]; arr[i, 7] = fb["psh"]
+    return arr, min(len(pkts), W)
+
+
 def flow_meta(flow):
     proto = str(flow.get("ip_proto", "")).lower()
     proto_tcp = 1 if proto == "tcp" else 0
@@ -128,6 +158,8 @@ def flow_meta(flow):
 
 def extract():
     rows = []
+    seqs = []       # 与 rows 一一对应的逐包序列 [W,C]
+    seqlens = []
     z = zipfile.ZipFile(ZIP)
     per_source_label_flows = Counter()
     for label in LABELS:
@@ -158,6 +190,9 @@ def extract():
                         feat["biflow_id"] = biflow_id
                         feat["vpn"] = src
                         rows.append(feat)
+                        sarr, slen = window_sequence(win)
+                        seqs.append(sarr)
+                        seqlens.append(slen)
                     nflows += 1
                     per_source_label_flows[(src, label)] += 1
                     if nflows >= K_FLOWS_PER_FILE:
@@ -166,7 +201,7 @@ def extract():
                 f.close()
             print("  %-22s / %-13s : %d biflows" % (src, label, nflows), flush=True)
     z.close()
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows), np.asarray(seqs, dtype=np.float32), np.asarray(seqlens, dtype=np.int16)
 
 
 def split_by_biflow(df, rng):
@@ -192,7 +227,8 @@ def balance_per_split(df, rng, cap_per_class_per_split):
             if len(idx) > cap_per_class_per_split:
                 idx = rng.sample(idx, cap_per_class_per_split)
             keep_idx.extend(idx)
-    return df.loc[sorted(keep_idx)].reset_index(drop=True)
+    kept = sorted(keep_idx)
+    return df.loc[kept].reset_index(drop=True), kept
 
 
 FEATURE_MANIFEST = [
@@ -222,12 +258,17 @@ def main():
     rng = random.Random(SEED)
 
     print("[extract] 流式读取 + 切窗口 ...")
-    df = extract()
+    df, seqs, seqlens = extract()
     print("[extract] 原始窗口样本数 = %d" % len(df))
     print("[extract] 各类窗口分布:%s" % dict(Counter(df["label"])))
 
     df = split_by_biflow(df, rng)
-    df = balance_per_split(df, rng, args.cap_per_class_per_split)
+    # 保存「全部 biflow -> split」映射(平衡前),供第3步的"更多包"按 biflow 变体复用同一划分
+    biflow_split = (df[["biflow_id", "split", "label"]].drop_duplicates("biflow_id")
+                    .set_index("biflow_id")[["split", "label"]].to_dict("index"))
+    df, kept = balance_per_split(df, rng, args.cap_per_class_per_split)
+    seqs = seqs[kept]          # 与平衡后的 df 行一一对齐
+    seqlens = seqlens[kept]
 
     # 列顺序:特征在前,元数据在后
     meta_cols = ["label", "split", "biflow_id", "vpn"]
@@ -237,6 +278,14 @@ def main():
     out = os.path.join(procdir, "features.csv")
     df.to_csv(out, index=False)
     print("[extract] 已写 %s (%d 行, %d 特征列)" % (out, len(df), len(feat_cols)))
+
+    # 逐包序列(与 features.csv 行严格对齐),供 host DNN 专家(第3步)
+    seq_path = os.path.join(procdir, "sequences.npz")
+    np.savez_compressed(seq_path, X_seq=seqs, seq_len=seqlens,
+                        channels=np.array(SEQ_CHANNELS),
+                        split=df["split"].to_numpy(),
+                        label=df["label"].to_numpy())
+    print("[extract] 已写 %s (X_seq shape=%s)" % (seq_path, seqs.shape))
 
     # calibration 单独存(只特征+标签,强调本步不使用)
     calib = df[df["split"] == "calibration"][feat_cols + ["label"]]
@@ -264,7 +313,10 @@ def main():
     }
     with open(os.path.join(procdir, "split_info.json"), "w") as fh:
         json.dump(info, fh, indent=2, ensure_ascii=False)
+    with open(os.path.join(procdir, "biflow_split.json"), "w") as fh:
+        json.dump(biflow_split, fh, ensure_ascii=False)
     print("[extract] split counts: %s" % json.dumps(info["counts"], ensure_ascii=False))
+    print("[extract] biflow->split 映射已存 biflow_split.json(%d 条 biflow)" % len(biflow_split))
     print("[extract] calibration 已单独存盘,本步不使用。")
 
 
